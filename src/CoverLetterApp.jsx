@@ -1,20 +1,49 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
-// NOTE: Firebase/Firestore imports have been removed per user request
-// to use localStorage for client-side persistence instead.
-
 // --- CONFIGURATION ---
 // !!! IMPORTANT !!! REPLACE THIS PLACEHOLDER WITH YOUR ACTUAL DEPLOYED CLOUD RUN URL
 const CLOUD_RUN_API_URL = "https://cover-letter-generator-310631449500.australia-southeast1.run.app/generate"; 
 const DEBOUNCE_DELAY = 1000; // Delay for saving inputs to localStorage (1 second)
 
+// === GOOGLE ANALYTICS CONFIGURATION ===
+// !!! IMPORTANT !!! REPLACE THIS WITH YOUR ACTUAL GA4 MEASUREMENT ID (e.g., 'G-XXXXXXXXXX')
+const GA_MEASUREMENT_ID = "G-E79N9CBD1Q";
+// ======================================
+
+// Check if the placeholder URL is still active
+const IS_CONFIG_PENDING = CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL");
+
 // Initial state for the input fields
 const initialInputs = {
     resume_url: '',
     job_description_url: '',
-    job_description_text: '', // ADDED: New field for text input
+    job_description_text: '', // New field for text input
     word_count: 300,
 };
+
+// --- Google Analytics Helper Function ---
+// This function dynamically injects the GA script and sends the initial page view.
+const initializeGoogleAnalytics = () => {
+    if (GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID")) {
+        console.warn("Google Analytics not initialized: Please replace GA_MEASUREMENT_ID with your actual ID.");
+        return;
+    }
+
+    // 1. Inject the Google Tag Manager script
+    const script = document.createElement('script');
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
+    script.async = true;
+    document.head.appendChild(script);
+
+    // 2. Setup the data layer and config
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', GA_MEASUREMENT_ID);
+    
+    console.log(`Google Analytics initialized with ID: ${GA_MEASUREMENT_ID}`);
+};
+
 
 // Main App Component
 const App = () => {
@@ -22,10 +51,24 @@ const App = () => {
     const [coverLetter, setCoverLetter] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [copySuccess, setCopySuccess] = useState(''); // ADDED: State for copy feedback
+    const [copySuccess, setCopySuccess] = useState(''); // State for copy feedback
 
     // Debounce Ref for saving inputs
     const debounceRef = useRef(null);
+
+    // --- 0. GOOGLE ANALYTICS INITIALIZATION ---
+    useEffect(() => {
+        initializeGoogleAnalytics();
+        
+        // Custom tracking for app load (optional)
+        if (window.gtag) {
+            window.gtag('event', 'app_load', {
+                'event_category': 'Engagement',
+                'event_label': 'Cover Letter App Loaded'
+            });
+        }
+    }, []);
+    // ------------------------------------------
 
     // --- 1. LOCAL STORAGE PERSISTENCE: SAVE ---
     // Function to save current inputs to browser's local storage
@@ -91,23 +134,27 @@ const App = () => {
     }, [saveInputsToLocalStorage]);
 
 
-    // --- 4. CLOUD RUN API CALL ---
+    // --- 4. CLOUD RUN API CALL & ANALYTICS EVENT ---
     const handleGenerate = async () => {
         // UPDATED VALIDATION: Check for either JD URL or JD Text
         const isJobDescriptionProvided = inputs.job_description_url.trim() || inputs.job_description_text.trim();
 
-        if (!inputs.resume_url.trim()) {
-            setError("Please provide a Resume URL.");
-            return;
-        }
-
-        if (!isJobDescriptionProvided) {
-             setError("Please provide either a Job Description URL or paste the job description text.");
-             return;
-        }
-
-        if (CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL")) {
-            setError("Configuration Error: Please update CLOUD_RUN_API_URL with your actual deployed URL.");
+        if (!inputs.resume_url.trim() || !isJobDescriptionProvided || IS_CONFIG_PENDING) {
+            // If validation fails, track failure event before returning
+            if (window.gtag) {
+                window.gtag('event', 'generate_attempt', {
+                    'event_category': 'Error',
+                    'event_label': 'Validation Failed',
+                    'success': false
+                });
+            }
+            if (!inputs.resume_url.trim()) {
+                setError("Please provide a Resume URL.");
+            } else if (!isJobDescriptionProvided) {
+                 setError("Please provide either a Job Description URL or paste the job description text.");
+            } else if (IS_CONFIG_PENDING) {
+                setError("Configuration Error: Please update CLOUD_RUN_API_URL with your actual deployed URL.");
+            }
             return;
         }
 
@@ -115,6 +162,16 @@ const App = () => {
         setError(null);
         setCoverLetter(null);
         setCopySuccess(''); // Clear copy status
+
+        // Track successful attempt
+        if (window.gtag) {
+            window.gtag('event', 'generate_attempt', {
+                'event_category': 'Interaction',
+                'event_label': 'Request Sent to API',
+                'success': true
+            });
+        }
+
 
         try {
             const response = await fetch(CLOUD_RUN_API_URL, {
@@ -136,11 +193,30 @@ const App = () => {
             }
 
             setCoverLetter(data.cover_letter);
+            
+            // Track successful generation
+            if (window.gtag) {
+                 window.gtag('event', 'generation_success', {
+                    'event_category': 'Conversion',
+                    'event_label': 'Cover Letter Generated',
+                    'word_count_target': inputs.word_count
+                });
+            }
+
 
         } catch (err) {
             console.error("API Call Error:", err);
+            
+            // Track generation failure
+            if (window.gtag) {
+                window.gtag('event', 'generation_failure', {
+                    'event_category': 'Error',
+                    'event_label': err.message.substring(0, 100), // Log first 100 chars of error
+                    'success': false
+                });
+            }
+
             if (err.message.includes("Gemini API Client is not initialized")) {
-                // Specific error handling for the backend configuration issue
                 setError(`Server Error: The Cloud Run service failed due to a missing or invalid GEMINI_API_KEY environment variable. Please check your deployment settings.`);
             } else {
                 setError(`Generation Failed: ${err.message}`);
@@ -150,10 +226,9 @@ const App = () => {
         }
     };
     
-    // --- 5. COPY BUTTON FUNCTIONALITY ---
+    // --- 5. COPY BUTTON FUNCTIONALITY & ANALYTICS EVENT ---
     const handleCopy = () => {
         if (coverLetter) {
-            // Use standard document.execCommand('copy') for iFrame compatibility
             const tempTextarea = document.createElement('textarea');
             tempTextarea.value = coverLetter;
             document.body.appendChild(tempTextarea);
@@ -162,7 +237,15 @@ const App = () => {
             try {
                 document.execCommand('copy');
                 setCopySuccess('Copied!');
-                setTimeout(() => setCopySuccess(''), 2000); // Clear message after 2 seconds
+                setTimeout(() => setCopySuccess(''), 2000); 
+
+                // Track copy event
+                if (window.gtag) {
+                     window.gtag('event', 'letter_copied', {
+                        'event_category': 'Conversion',
+                        'event_label': 'Cover Letter Copied'
+                    });
+                }
             } catch (err) {
                 console.error('Failed to copy text: ', err);
                 setCopySuccess('Copy Failed');
@@ -173,6 +256,9 @@ const App = () => {
 
 
     // --- 6. RENDER UI ---
+    // Combined condition for disabling the button
+    const isDisabled = loading || !inputs.resume_url.trim() || (!inputs.job_description_url.trim() && !inputs.job_description_text.trim()) || IS_CONFIG_PENDING;
+
     return (
         <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
             <header className="mb-8 text-center">
@@ -188,6 +274,12 @@ const App = () => {
                 <div className="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-blue-100">
                     <h2 className="text-xl font-semibold mb-4 text-blue-700">1. Input Sources & Constraints</h2>
                     
+                    {GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID") && (
+                        <div className="p-3 mb-4 bg-yellow-100 text-yellow-800 rounded-lg text-sm border border-yellow-300">
+                            **Analytics Warning:** Please update the `GA_MEASUREMENT_ID` constant in `src/CoverLetterApp.jsx` to enable Google Analytics tracking.
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         {/* Resume URL */}
                         <InputGroup 
@@ -214,7 +306,7 @@ const App = () => {
                         <h3 className="text-base font-semibold text-gray-700">Job Description (Choose one option):</h3>
                         
                         {/* Job Description URL */}
-                        <InputGroup 
+                        <InputGroup
                             label="Option A: Job Description URL (e.g., Seek, LinkedIn)" 
                             name="job_description_url" 
                             value={inputs.job_description_url} 
@@ -236,12 +328,12 @@ const App = () => {
                     
                     <button 
                         onClick={handleGenerate} 
-                        disabled={loading || !inputs.resume_url.trim() || (!inputs.job_description_url.trim() && !inputs.job_description_text.trim()) || CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL")}
+                        disabled={isDisabled}
                         className={`mt-6 w-full py-3 rounded-lg font-bold text-lg transition duration-200 ease-in-out shadow-lg 
-                            ${loading || CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL") ? 'bg-blue-300 text-blue-100 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl active:bg-blue-800'}`
+                            ${isDisabled ? 'bg-blue-300 text-blue-100 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl active:bg-blue-800'}`
                         }
                     >
-                        {loading ? 'Generating Letter...' : 'Generate Cover Letter'}
+                        {loading ? 'Generating Letter...' : IS_CONFIG_PENDING ? 'Configuration Pending' : 'Generate Cover Letter'}
                     </button>
                     
                 </div>
