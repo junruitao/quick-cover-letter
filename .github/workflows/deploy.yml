@@ -11,6 +11,8 @@ on:
 env:
   NODE_VERSION: '20' 
   BUILD_DIR: 'build' # Standard output directory for create-react-app builds
+  # Set the base path (required if using a non-root deployment like /<repo-name>/)
+  # BASE_PATH: '/<repository-name>/' 
 
 jobs:
   build_and_deploy:
@@ -40,15 +42,26 @@ jobs:
         # Assumes your package.json has a 'build' script (e.g., 'react-scripts build')
         run: npm run build 
         
-      # 4. Configure GitHub Pages Deployment Environment
-      # This step must run first to initialize the deployment
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      # --- The official deploy-pages action (Steps 4 & 5) often fails with pathing/setup issues. 
+      # --- Switching to the highly reliable peaceiris action, which pushes directly to gh-pages branch.
+      # --- The main fix for this file not found error is setting "homepage" in package.json.
 
-      # 5. Deploy to GitHub Pages
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # 4. Deploy to gh-pages branch (Reliable Alternative)
+      # This action pushes the build directory directly to the 'gh-pages' branch.
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        if: success()
         with:
-          # Deploys the content of the standard 'build' directory
-          artifact_path: ${{ env.BUILD_DIR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ env.BUILD_DIR }}
+          # cname: 'my-custom-domain.com' # Uncomment if using a custom domain
+      # ----------------------------------------------------------------------
+      
+      # Commenting out the official API-based deployment steps that were failing:
+      # - name: Setup Pages
+      #   uses: actions/configure-pages@v5
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v4
+      #   with:
+      #     artifact_path: ${{ env.BUILD_DIR }}

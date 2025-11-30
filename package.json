@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A React UI for generating tailored cover letters via a Cloud Run API.",
   "main": "index.js",
+  "homepage": "https://junruitao.github.io/quick-cover-letter",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build"
@@ -10,8 +11,7 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "firebase": "^10.12.3"
+    "react-scripts": "5.0.1"
   },
   "browserslist": {
     "production": [
