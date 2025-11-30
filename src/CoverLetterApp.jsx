@@ -12,6 +12,7 @@ const DEBOUNCE_DELAY = 1000; // Delay for saving inputs to localStorage (1 secon
 const initialInputs = {
     resume_url: '',
     job_description_url: '',
+    job_description_text: '', // ADDED: New field for text input
     word_count: 300,
 };
 
@@ -21,6 +22,7 @@ const App = () => {
     const [coverLetter, setCoverLetter] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [copySuccess, setCopySuccess] = useState(''); // ADDED: State for copy feedback
 
     // Debounce Ref for saving inputs
     const debounceRef = useRef(null);
@@ -49,6 +51,8 @@ const App = () => {
                 setInputs(prev => ({
                     ...prev, 
                     ...parsedInputs, 
+                    // Ensure new fields have a default if missing
+                    job_description_text: parsedInputs.job_description_text || '',
                     // Ensure word_count is handled as a number
                     word_count: Number(parsedInputs.word_count) || 300
                 }));
@@ -89,9 +93,17 @@ const App = () => {
 
     // --- 4. CLOUD RUN API CALL ---
     const handleGenerate = async () => {
-        if (!inputs.resume_url || !inputs.job_description_url) {
-            setError("Please provide both Resume URL and Job Description URL.");
+        // UPDATED VALIDATION: Check for either JD URL or JD Text
+        const isJobDescriptionProvided = inputs.job_description_url.trim() || inputs.job_description_text.trim();
+
+        if (!inputs.resume_url.trim()) {
+            setError("Please provide a Resume URL.");
             return;
+        }
+
+        if (!isJobDescriptionProvided) {
+             setError("Please provide either a Job Description URL or paste the job description text.");
+             return;
         }
 
         if (CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL")) {
@@ -102,12 +114,19 @@ const App = () => {
         setLoading(true);
         setError(null);
         setCoverLetter(null);
+        setCopySuccess(''); // Clear copy status
 
         try {
             const response = await fetch(CLOUD_RUN_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(inputs),
+                // Only send non-empty fields to the backend
+                body: JSON.stringify({
+                    resume_url: inputs.resume_url,
+                    job_description_url: inputs.job_description_url.trim() || null,
+                    job_description_text: inputs.job_description_text.trim() || null,
+                    word_count: inputs.word_count,
+                }),
             });
 
             const data = await response.json();
@@ -130,16 +149,37 @@ const App = () => {
             setLoading(false);
         }
     };
+    
+    // --- 5. COPY BUTTON FUNCTIONALITY ---
+    const handleCopy = () => {
+        if (coverLetter) {
+            // Use standard document.execCommand('copy') for iFrame compatibility
+            const tempTextarea = document.createElement('textarea');
+            tempTextarea.value = coverLetter;
+            document.body.appendChild(tempTextarea);
+            tempTextarea.select();
+            
+            try {
+                document.execCommand('copy');
+                setCopySuccess('Copied!');
+                setTimeout(() => setCopySuccess(''), 2000); // Clear message after 2 seconds
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                setCopySuccess('Copy Failed');
+            }
+            document.body.removeChild(tempTextarea);
+        }
+    };
 
 
-    // --- 5. RENDER UI ---
+    // --- 6. RENDER UI ---
     return (
         <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
             <header className="mb-8 text-center">
                 <h1 className="text-3xl font-extrabold text-blue-800">Gemini-Powered Cover Letter Generator</h1>
-                <p className="text-gray-600 mt-1">Fetch content from URLs and generate tailored letters using AI.</p>
+                <p className="text-gray-600 mt-1">Fetch content from URLs or paste text, then generate tailored letters using AI.</p>
                 <p className="text-xs text-gray-500 mt-2">
-                    Data persistence is handled via **browser local storage**.
+                    Inputs are saved in your browser's **local storage**.
                 </p>
             </header>
 
@@ -148,7 +188,8 @@ const App = () => {
                 <div className="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-blue-100">
                     <h2 className="text-xl font-semibold mb-4 text-blue-700">1. Input Sources & Constraints</h2>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        {/* Resume URL */}
                         <InputGroup 
                             label="Resume URL (Text/PDF/DOC)" 
                             name="resume_url" 
@@ -157,14 +198,7 @@ const App = () => {
                             type="url"
                             placeholder="e.g., https://my.storage.com/resume.txt"
                         />
-                        <InputGroup 
-                            label="Job Description URL (HTML)" 
-                            name="job_description_url" 
-                            value={inputs.job_description_url} 
-                            onChange={handleInputChange} 
-                            type="url"
-                            placeholder="e.g., https://www.seek.com.au/job/..."
-                        />
+                        {/* Word Count */}
                         <InputGroup 
                             label="Target Word Count" 
                             name="word_count" 
@@ -175,10 +209,34 @@ const App = () => {
                             max={1000}
                         />
                     </div>
+
+                    <div className="space-y-4 pt-4 border-t border-gray-100">
+                        <h3 className="text-base font-semibold text-gray-700">Job Description (Choose one option):</h3>
+                        
+                        {/* Job Description URL */}
+                        <InputGroup 
+                            label="Option A: Job Description URL (e.g., Seek, LinkedIn)" 
+                            name="job_description_url" 
+                            value={inputs.job_description_url} 
+                            onChange={handleInputChange} 
+                            type="url"
+                            placeholder="e.g., https://www.seek.com.au/job/..."
+                        />
+
+                        {/* Job Description Text Area */}
+                        <TextAreaGroup 
+                            label="Option B: Paste Job Description Text Directly" 
+                            name="job_description_text" 
+                            value={inputs.job_description_text} 
+                            onChange={handleInputChange} 
+                            rows={8}
+                            placeholder="Paste the full job description text here..."
+                        />
+                    </div>
                     
                     <button 
                         onClick={handleGenerate} 
-                        disabled={loading || !inputs.resume_url || !inputs.job_description_url || CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL")}
+                        disabled={loading || !inputs.resume_url.trim() || (!inputs.job_description_url.trim() && !inputs.job_description_text.trim()) || CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL")}
                         className={`mt-6 w-full py-3 rounded-lg font-bold text-lg transition duration-200 ease-in-out shadow-lg 
                             ${loading || CLOUD_RUN_API_URL.includes("YOUR-CLOUD-RUN-URL") ? 'bg-blue-300 text-blue-100 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl active:bg-blue-800'}`
                         }
@@ -213,8 +271,33 @@ const App = () => {
 
                     {/* Cover Letter Output */}
                     {coverLetter && (
-                        <div className="border border-gray-200 bg-gray-50 p-4 rounded-lg shadow-inner whitespace-pre-wrap leading-relaxed text-gray-800">
-                            {coverLetter}
+                        <div className="space-y-4">
+                            <div className="flex justify-end">
+                                <button
+                                    onClick={handleCopy}
+                                    className="px-4 py-2 text-sm font-semibold rounded-lg text-white bg-green-500 hover:bg-green-600 transition duration-150 relative overflow-hidden"
+                                >
+                                    {copySuccess === 'Copied!' ? (
+                                        <span className="flex items-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 mr-1">
+                                                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1.17 1.09L7.966 16.518a.75.75 0 0 1-1.03-.04L2.246 10.322a.75.75 0 0 1 1.053-1.077l4.137 4.044 8.243-9.585Z" clipRule="evenodd" />
+                                            </svg>
+                                            {copySuccess}
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 mr-1">
+                                                <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.25A1.75 1.75 0 0 1 13.5 3.75v3.5a.75.75 0 0 1-1.5 0V3.75a.25.25 0 0 0-.25-.25H8.5a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h4.75a.75.75 0 0 1 0 1.5H8.5A1.75 1.75 0 0 1 7 16.25v-12.5Z" />
+                                                <path d="M14 7.5a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0V8.25A.75.75 0 0 1 14 7.5Z" />
+                                            </svg>
+                                            Copy Letter
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                            <div className="border border-gray-200 bg-gray-50 p-6 rounded-lg shadow-inner whitespace-pre-wrap leading-relaxed text-gray-800">
+                                {coverLetter}
+                            </div>
                         </div>
                     )}
 
@@ -242,6 +325,23 @@ const InputGroup = ({ label, name, value, onChange, type = 'text', ...props }) =
             value={value}
             onChange={onChange}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out disabled:bg-gray-100 disabled:text-gray-500"
+            {...props}
+        />
+    </div>
+);
+
+// Helper component for styled text area fields
+const TextAreaGroup = ({ label, name, value, onChange, ...props }) => (
+    <div className="flex flex-col">
+        <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
+            {label}
+        </label>
+        <textarea
+            id={name}
+            name={name}
+            value={value}
+            onChange={onChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out disabled:bg-gray-100 disabled:text-gray-500 resize-y"
             {...props}
         />
     </div>
