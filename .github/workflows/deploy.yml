@@ -1,0 +1,54 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  # Triggers the workflow on pushes to the 'main' branch
+  push:
+    branches:
+      - main
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20' 
+  BUILD_DIR: 'build' # Standard output directory for create-react-app builds
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push to the gh-pages branch
+      pages: write    # Required for the deployment to GitHub Pages
+      id-token: write # Required for deployment configuration
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 1. Setup Node.js Environment
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm' # Cache dependencies for faster builds
+
+      # 2. Install Dependencies
+      - name: Install NPM Dependencies
+        run: npm install
+
+      # 3. Build the React Application
+      - name: Build React App
+        # Assumes your package.json has a 'build' script (e.g., 'react-scripts build')
+        run: npm run build 
+        
+      # 4. Configure GitHub Pages Deployment Environment
+      # This step must run first to initialize the deployment
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # 5. Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          # Deploys the content of the standard 'build' directory
+          artifact_path: ${{ env.BUILD_DIR }}
