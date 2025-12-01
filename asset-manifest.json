@@ -1,10 +1,10 @@
 {
   "files": {
-    "main.js": "/quick-cover-letter/static/js/main.5cbdea4a.js",
+    "main.js": "/quick-cover-letter/static/js/main.b4eb3453.js",
     "index.html": "/quick-cover-letter/index.html",
-    "main.5cbdea4a.js.map": "/quick-cover-letter/static/js/main.5cbdea4a.js.map"
+    "main.b4eb3453.js.map": "/quick-cover-letter/static/js/main.b4eb3453.js.map"
   },
   "entrypoints": [
-    "static/js/main.5cbdea4a.js"
+    "static/js/main.b4eb3453.js"
   ]
 }
