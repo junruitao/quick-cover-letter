@@ -29,17 +29,22 @@ const initializeGoogleAnalytics = () => {
         return;
     }
 
-    // 1. Inject the Google Tag Manager script
+    // 1. Setup the data layer and define the global gtag function
+    // This ensures all subsequent calls to gtag will push data to the dataLayer, 
+    // even if the GA script itself is blocked from loading.
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){window.dataLayer.push(arguments);}
+    window.gtag = gtag; // Explicitly assign the function to the global scope
+    
+    // Initial GA setup calls
+    window.gtag('js', new Date());
+    window.gtag('config', GA_MEASUREMENT_ID);
+
+    // 2. Inject the Google Tag Manager script
     const script = document.createElement('script');
     script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
     script.async = true;
     document.head.appendChild(script);
-
-    // 2. Setup the data layer and config
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', GA_MEASUREMENT_ID);
     
     console.log(`Google Analytics initialized with ID: ${GA_MEASUREMENT_ID}`);
 };
