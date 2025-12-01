@@ -7,7 +7,10 @@ const DEBOUNCE_DELAY = 1000; // Delay for saving inputs to localStorage (1 secon
 
 // === GOOGLE ANALYTICS CONFIGURATION ===
 // !!! IMPORTANT !!! REPLACE THIS WITH YOUR ACTUAL GA4 MEASUREMENT ID (e.g., 'G-XXXXXXXXXX')
-const GA_MEASUREMENT_ID = "G-E79N9CBD1Q";
+const GA_MEASUREMENT_ID = "G-E79N9CBD1Q"; 
+
+// !!! CRITICAL !!! You must generate this secret in Google Analytics (Admin -> Data Streams -> Measurement Protocol API Secrets)
+const GA_MP_API_SECRET = "caYq5NM9TsyBYzxT7D6SHA"; 
 // ======================================
 
 // Check if the placeholder URL is still active
@@ -21,24 +24,26 @@ const initialInputs = {
     word_count: 300,
 };
 
-// --- Google Analytics Helper Function ---
-// This function dynamically injects the GA script and sends the initial page view.
-const initializeGoogleAnalytics = () => {
+// --- Google Analytics Helper Functions ---
+
+// 1. Client-Side gtag initialization (for browsers where it's NOT blocked)
+const initializeGoogleAnalytics = (clientId) => {
     if (GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID")) {
         console.warn("Google Analytics not initialized: Please replace GA_MEASUREMENT_ID with your actual ID.");
         return;
     }
 
     // 1. Setup the data layer and define the global gtag function
-    // This ensures all subsequent calls to gtag will push data to the dataLayer, 
-    // even if the GA script itself is blocked from loading.
     window.dataLayer = window.dataLayer || [];
     function gtag(){window.dataLayer.push(arguments);}
-    window.gtag = gtag; // Explicitly assign the function to the global scope
+    window.gtag = gtag; 
     
     // Initial GA setup calls
+    // The client_id is passed here for identification
     window.gtag('js', new Date());
-    window.gtag('config', GA_MEASUREMENT_ID);
+    window.gtag('config', GA_MEASUREMENT_ID, {
+        'client_id': clientId // Use the persistent client ID
+    });
 
     // 2. Inject the Google Tag Manager script
     const script = document.createElement('script');
@@ -49,6 +54,46 @@ const initializeGoogleAnalytics = () => {
     console.log(`Google Analytics initialized with ID: ${GA_MEASUREMENT_ID}`);
 };
 
+// 2. Measurement Protocol fallback (for critical events when gtag.js is blocked)
+const sendMeasurementProtocolEvent = async (event_name, event_params, clientId) => {
+    if (GA_MP_API_SECRET.includes("YOUR-MP-API-SECRET")) {
+        console.warn("Measurement Protocol not used: GA_MP_API_SECRET not configured.");
+        return;
+    }
+    
+    // Endpoint for GA4 Measurement Protocol
+    const endpoint = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_MP_API_SECRET}`;
+
+    const payload = {
+        // Required unique user identifier
+        client_id: clientId, 
+        
+        // Array containing the events to send
+        events: [
+            {
+                name: event_name,
+                params: {
+                    ...event_params,
+                    // Use session_id and engagement_time_msec to simulate user activity
+                    session_id: Date.now().toString(),
+                    engagement_time_msec: '1000',
+                },
+            },
+        ],
+    };
+
+    try {
+        await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        console.log(`MP Event Sent: ${event_name}`);
+    } catch (error) {
+        console.error(`MP Event Failed for ${event_name}:`, error);
+    }
+};
+
 
 // Main App Component
 const App = () => {
@@ -56,16 +101,27 @@ const App = () => {
     const [coverLetter, setCoverLetter] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [copySuccess, setCopySuccess] = useState(''); // State for copy feedback
+    const [copySuccess, setCopySuccess] = useState(''); 
+    const [clientId, setClientId] = useState(null); // State for unique GA user ID
 
     // Debounce Ref for saving inputs
     const debounceRef = useRef(null);
 
-    // --- 0. GOOGLE ANALYTICS INITIALIZATION ---
+    // --- 0. GOOGLE ANALYTICS & CLIENT ID INITIALIZATION ---
     useEffect(() => {
-        initializeGoogleAnalytics();
+        // Get or generate a persistent unique ID for the user
+        let storedClientId = localStorage.getItem('ga_client_id');
+        if (!storedClientId) {
+            // Generate a new unique ID if none exists
+            storedClientId = crypto.randomUUID(); 
+            localStorage.setItem('ga_client_id', storedClientId);
+        }
+        setClientId(storedClientId);
+
+        // Initialize standard GA tracking
+        initializeGoogleAnalytics(storedClientId);
         
-        // Custom tracking for app load (optional)
+        // Custom tracking for app load (optional - relies on gtag.js)
         if (window.gtag) {
             window.gtag('event', 'app_load', {
                 'event_category': 'Engagement',
@@ -145,7 +201,7 @@ const App = () => {
         const isJobDescriptionProvided = inputs.job_description_url.trim() || inputs.job_description_text.trim();
 
         if (!inputs.resume_url.trim() || !isJobDescriptionProvided || IS_CONFIG_PENDING) {
-            // If validation fails, track failure event before returning
+            // If validation fails, track failure event before returning (gtag only)
             if (window.gtag) {
                 window.gtag('event', 'generate_attempt', {
                     'event_category': 'Error',
@@ -168,7 +224,7 @@ const App = () => {
         setCoverLetter(null);
         setCopySuccess(''); // Clear copy status
 
-        // Track successful attempt
+        // Track successful attempt (gtag only)
         if (window.gtag) {
             window.gtag('event', 'generate_attempt', {
                 'event_category': 'Interaction',
@@ -200,19 +256,26 @@ const App = () => {
             setCoverLetter(data.cover_letter);
             
             // Track successful generation
-            if (window.gtag) {
-                 window.gtag('event', 'generation_success', {
-                    'event_category': 'Conversion',
-                    'event_label': 'Cover Letter Generated',
-                    'word_count_target': inputs.word_count
-                });
-            }
+            const success_params = {
+                'event_category': 'Conversion',
+                'event_label': 'Cover Letter Generated',
+                'word_count_target': inputs.word_count
+            };
 
+            // 1. Send via standard gtag (if available)
+            if (window.gtag) {
+                 window.gtag('event', 'generation_success', success_params);
+            }
+            
+            // 2. Send via Measurement Protocol (MP) fallback (always try this for critical events)
+            if (clientId) {
+                await sendMeasurementProtocolEvent('generation_success_mp', success_params, clientId);
+            }
 
         } catch (err) {
             console.error("API Call Error:", err);
             
-            // Track generation failure
+            // Track generation failure (gtag only)
             if (window.gtag) {
                 window.gtag('event', 'generation_failure', {
                     'event_category': 'Error',
@@ -244,7 +307,7 @@ const App = () => {
                 setCopySuccess('Copied!');
                 setTimeout(() => setCopySuccess(''), 2000); 
 
-                // Track copy event
+                // Track copy event (gtag only)
                 if (window.gtag) {
                      window.gtag('event', 'letter_copied', {
                         'event_category': 'Conversion',
@@ -279,9 +342,9 @@ const App = () => {
                 <div className="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-blue-100">
                     <h2 className="text-xl font-semibold mb-4 text-blue-700">1. Input Sources & Constraints</h2>
                     
-                    {GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID") && (
+                    {(GA_MP_API_SECRET.includes("YOUR-MP-API-SECRET") || GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID")) && (
                         <div className="p-3 mb-4 bg-yellow-100 text-yellow-800 rounded-lg text-sm border border-yellow-300">
-                            **Analytics Warning:** Please update the `GA_MEASUREMENT_ID` constant in `src/CoverLetterApp.jsx` to enable Google Analytics tracking.
+                            **Analytics Warning:** Please update the `GA_MP_API_SECRET` and ensure `GA_MEASUREMENT_ID` is correct to guarantee robust tracking.
                         </div>
                     )}
 
