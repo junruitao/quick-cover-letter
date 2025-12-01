@@ -6,10 +6,10 @@ const CLOUD_RUN_API_URL = "https://cover-letter-generator-310631449500.australia
 const DEBOUNCE_DELAY = 1000; // Delay for saving inputs to localStorage (1 second)
 
 // === GOOGLE ANALYTICS CONFIGURATION ===
-// !!! IMPORTANT !!! REPLACE THIS WITH YOUR ACTUAL GA4 MEASUREMENT ID (e.g., 'G-XXXXXXXXXX')
+// GA4 Measurement ID
 const GA_MEASUREMENT_ID = "G-E79N9CBD1Q"; 
 
-// !!! CRITICAL !!! You must generate this secret in Google Analytics (Admin -> Data Streams -> Measurement Protocol API Secrets)
+// CRITICAL: The user's provided Measurement Protocol API Secret
 const GA_MP_API_SECRET = "caYq5NM9TsyBYzxT7D6SHA"; 
 // ======================================
 
@@ -34,6 +34,7 @@ const initializeGoogleAnalytics = (clientId) => {
     }
 
     // 1. Setup the data layer and define the global gtag function
+    // This provides a fallback if the script is blocked, ensuring gtag calls don't crash the app.
     window.dataLayer = window.dataLayer || [];
     function gtag(){window.dataLayer.push(arguments);}
     window.gtag = gtag; 
@@ -55,6 +56,7 @@ const initializeGoogleAnalytics = (clientId) => {
 };
 
 // 2. Measurement Protocol fallback (for critical events when gtag.js is blocked)
+// This function sends data directly to Google's servers via HTTP POST.
 const sendMeasurementProtocolEvent = async (event_name, event_params, clientId) => {
     if (GA_MP_API_SECRET.includes("YOUR-MP-API-SECRET")) {
         console.warn("Measurement Protocol not used: GA_MP_API_SECRET not configured.");
@@ -75,7 +77,7 @@ const sendMeasurementProtocolEvent = async (event_name, event_params, clientId) 
                 params: {
                     ...event_params,
                     // Use session_id and engagement_time_msec to simulate user activity
-                    session_id: Date.now().toString(),
+                    session_id: localStorage.getItem('ga_session_id') || Date.now().toString(),
                     engagement_time_msec: '1000',
                 },
             },
@@ -109,7 +111,7 @@ const App = () => {
 
     // --- 0. GOOGLE ANALYTICS & CLIENT ID INITIALIZATION ---
     useEffect(() => {
-        // Get or generate a persistent unique ID for the user
+        // 1. Get or generate a persistent unique ID for the user
         let storedClientId = localStorage.getItem('ga_client_id');
         if (!storedClientId) {
             // Generate a new unique ID if none exists
@@ -117,11 +119,16 @@ const App = () => {
             localStorage.setItem('ga_client_id', storedClientId);
         }
         setClientId(storedClientId);
+        
+        // 2. Initialize a session ID (optional, but helps with MP)
+        if (!localStorage.getItem('ga_session_id')) {
+            localStorage.setItem('ga_session_id', Date.now().toString());
+        }
 
-        // Initialize standard GA tracking
+        // 3. Initialize standard GA tracking
         initializeGoogleAnalytics(storedClientId);
         
-        // Custom tracking for app load (optional - relies on gtag.js)
+        // Custom tracking for app load (gtag only)
         if (window.gtag) {
             window.gtag('event', 'app_load', {
                 'event_category': 'Engagement',
@@ -255,22 +262,24 @@ const App = () => {
 
             setCoverLetter(data.cover_letter);
             
-            // Track successful generation
+            // --- ANALYTICS TRACKING: SUCCESSFUL GENERATION ---
             const success_params = {
                 'event_category': 'Conversion',
                 'event_label': 'Cover Letter Generated',
                 'word_count_target': inputs.word_count
             };
 
-            // 1. Send via standard gtag (if available)
+            // 1. Send via standard gtag (if available/not blocked)
             if (window.gtag) {
                  window.gtag('event', 'generation_success', success_params);
             }
             
-            // 2. Send via Measurement Protocol (MP) fallback (always try this for critical events)
+            // 2. Send via Measurement Protocol (MP) fallback (guaranteed tracking for critical conversion)
             if (clientId) {
                 await sendMeasurementProtocolEvent('generation_success_mp', success_params, clientId);
             }
+            // --------------------------------------------------
+
 
         } catch (err) {
             console.error("API Call Error:", err);
@@ -307,13 +316,25 @@ const App = () => {
                 setCopySuccess('Copied!');
                 setTimeout(() => setCopySuccess(''), 2000); 
 
-                // Track copy event (gtag only)
+                // --- ANALYTICS TRACKING: COPY EVENT ---
+                const copy_params = {
+                    'event_category': 'Conversion',
+                    'event_label': 'Cover Letter Copied'
+                };
+
+                // 1. Send via standard gtag (if available/not blocked)
                 if (window.gtag) {
-                     window.gtag('event', 'letter_copied', {
-                        'event_category': 'Conversion',
-                        'event_label': 'Cover Letter Copied'
-                    });
+                     window.gtag('event', 'letter_copied', copy_params);
                 }
+                
+                // 2. Send via Measurement Protocol (MP) fallback (guaranteed tracking for critical conversion)
+                if (clientId) {
+                    // Using a separate MP event name for clarity in GA4 reports
+                    sendMeasurementProtocolEvent('letter_copied_mp', copy_params, clientId); 
+                }
+                // ---------------------------------------
+
+
             } catch (err) {
                 console.error('Failed to copy text: ', err);
                 setCopySuccess('Copy Failed');
@@ -342,9 +363,9 @@ const App = () => {
                 <div className="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-blue-100">
                     <h2 className="text-xl font-semibold mb-4 text-blue-700">1. Input Sources & Constraints</h2>
                     
-                    {(GA_MP_API_SECRET.includes("YOUR-MP-API-SECRET") || GA_MEASUREMENT_ID.includes("YOUR-GA-MEASUREMENT-ID")) && (
+                    {GA_MP_API_SECRET.includes("YOUR-MP-API-SECRET") && (
                         <div className="p-3 mb-4 bg-yellow-100 text-yellow-800 rounded-lg text-sm border border-yellow-300">
-                            **Analytics Warning:** Please update the `GA_MP_API_SECRET` and ensure `GA_MEASUREMENT_ID` is correct to guarantee robust tracking.
+                            **Analytics Warning:** Please replace the `GA_MP_API_SECRET` with your actual secret to enable guaranteed tracking.
                         </div>
                     )}
 
